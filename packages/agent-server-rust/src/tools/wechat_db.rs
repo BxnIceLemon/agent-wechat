@@ -5,13 +5,12 @@ use std::process::Command;
 
 /// Query a WeChat database and return parsed rows.
 ///
-/// Opens with READ_ONLY + busy_timeout instead of `immutable=1`.
-/// WeChat DBs may use DELETE journal mode (not WAL), so:
-/// - `immutable=1` skips change-detection → stale reads even on fresh connections
-/// - Normal READ_ONLY acquires a brief SHARED lock → sees current committed state
-/// - `busy_timeout` prevents hanging if WeChat holds an EXCLUSIVE lock
-/// - Short-lived connection (opened per query, dropped immediately) minimises
-///   the window where our SHARED lock could block WeChat's writer.
+/// Opens with READ_ONLY + busy_timeout. WeChat DBs use WAL journal mode, so:
+/// - Readers and writers never block each other (WAL concurrency)
+/// - READ_ONLY reads both the main DB and the WAL file → sees latest committed data
+/// - `immutable=1` must NOT be used — it skips the WAL and returns stale data
+/// - `busy_timeout` is a safety net in case any DB uses DELETE mode
+/// - Short-lived connections (opened per query, dropped immediately)
 pub fn query_wechat_db(
     db_path: &str,
     hex_key: &str,
