@@ -76,6 +76,49 @@ test("normalizeWeChatCommandBody strips leading mentions before slash commands i
   );
 });
 
+test("normalizeWeChatCommandBody handles multi-word agent names with \\u2005 separator", () => {
+  // Single multi-word mention
+  assert.equal(
+    normalizeWeChatCommandBody("@Agent Name\u2005/compact", {
+      isGroup: true,
+      wasMentioned: true,
+    }),
+    "/compact",
+  );
+  // Multi-word mention with command arguments
+  assert.equal(
+    normalizeWeChatCommandBody("@Agent Name\u2005/compact focus", {
+      isGroup: true,
+      wasMentioned: true,
+    }),
+    "/compact focus",
+  );
+  // Multiple multi-word mentions
+  assert.equal(
+    normalizeWeChatCommandBody("@Agent Name\u2005@Admin User\u2005/status", {
+      isGroup: true,
+      wasMentioned: true,
+    }),
+    "/status",
+  );
+  // Multi-word mention followed by non-mention text should NOT strip
+  assert.equal(
+    normalizeWeChatCommandBody("@Agent Name\u2005hello /compact", {
+      isGroup: true,
+      wasMentioned: true,
+    }),
+    "@Agent Name\u2005hello /compact",
+  );
+  // Full-width @ with multi-word name
+  assert.equal(
+    normalizeWeChatCommandBody("\uFF20Agent Name\u2005/compact", {
+      isGroup: true,
+      wasMentioned: true,
+    }),
+    "/compact",
+  );
+});
+
 test("resolveWeChatPolicyContext resolves overrides and effective allowlists", () => {
   const cfg: OpenClawConfig = {
     channels: {

@@ -41,6 +41,10 @@ export type WeChatMentionGateResult = {
 const INVISIBLE_TEXT_RE = /[\u200b-\u200f\u202a-\u202e\u2060-\u206f]/g;
 const MENTION_SEPARATOR_RE = /[\s\u2005]+/u;
 const WECHAT_MENTION_TOKEN_RE = /^[@＠][^\s\u2005]+$/u;
+// WeChat appends \u2005 (four-per-em space) after each @mention. This regex
+// matches one or more \u2005-terminated mention chunks, supporting display
+// names that contain regular spaces (e.g. "@Agent Name\u2005").
+const WECHAT_MENTION_CHUNK_RE = /^([@＠][^\u2005]+\u2005\s*)+$/u;
 
 function unique(values: string[]): string[] {
   return Array.from(new Set(values));
@@ -92,8 +96,8 @@ function findCommandTokenStart(input: string): number {
     return -1;
   }
   const whole = match[0] ?? "";
-  const startsWithSpace = whole.startsWith(" ");
-  return (match.index ?? 0) + (startsWithSpace ? 1 : 0);
+  const startsWithWhitespace = /^\s/u.test(whole);
+  return (match.index ?? 0) + (startsWithWhitespace ? 1 : 0);
 }
 
 export function normalizeWeChatCommandBody(
@@ -113,10 +117,17 @@ export function normalizeWeChatCommandBody(
   if (commandStart < 0) {
     return trimmed;
   }
-  const prefix = trimmed.slice(0, commandStart).trim();
+  const rawPrefix = trimmed.slice(0, commandStart);
+  const prefix = rawPrefix.trim();
   if (!prefix) {
     return trimmed.slice(commandStart).trimStart();
   }
+  // WeChat appends \u2005 after each @mention. Try \u2005-delimited matching
+  // first so display names with spaces (e.g. "@Agent Name") are handled.
+  if (WECHAT_MENTION_CHUNK_RE.test(rawPrefix)) {
+    return trimmed.slice(commandStart).trimStart();
+  }
+  // Fallback: whitespace-tokenized mentions (no \u2005 terminators)
   const prefixTokens = prefix
     .split(MENTION_SEPARATOR_RE)
     .map((token) => token.trim())
