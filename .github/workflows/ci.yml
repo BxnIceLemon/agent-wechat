@@ -48,3 +48,6 @@ jobs:
 
       - name: Cargo check
         run: cargo check --manifest-path packages/agent-server-rust/Cargo.toml
+
+      - name: Cargo test
+        run: cargo test --manifest-path packages/agent-server-rust/Cargo.toml
