@@ -14,6 +14,9 @@ const SCAN_INTERVAL_SECS: u64 = 1;
 /// Kill WeChat if no IA state has been identified for this long (in seconds).
 const UNRESPONSIVE_TIMEOUT_SECS: u64 = 60;
 
+/// Kill orphaned WeChat child processes if main process has been missing this long (in seconds).
+const MISSING_PROCESS_TIMEOUT_SECS: u64 = 10;
+
 /// Global flag to pause health monitoring during active execution loops.
 static MONITORING_PAUSED: AtomicBool = AtomicBool::new(false);
 
@@ -37,6 +40,7 @@ pub fn spawn_health_monitor() {
         tracing::info!("[health] WeChat health monitor started");
 
         let mut last_identified = Instant::now();
+        let mut last_process_seen = Instant::now();
 
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(SCAN_INTERVAL_SECS)).await;
@@ -44,6 +48,7 @@ pub fn spawn_health_monitor() {
             // Skip if monitoring is paused (an execution loop is active)
             if MONITORING_PAUSED.load(Ordering::Relaxed) {
                 last_identified = Instant::now();
+                last_process_seen = Instant::now();
                 continue;
             }
 
@@ -52,15 +57,33 @@ pub fn spawn_health_monitor() {
                 Some(s) if s.status == "running" => s,
                 _ => {
                     last_identified = Instant::now();
+                    last_process_seen = Instant::now();
                     continue;
                 }
             };
 
             // Check if WeChat process is even running
             let wechat_pid = match find_wechat_pid() {
-                Some(pid) => pid,
+                Some(pid) => {
+                    last_process_seen = Instant::now();
+                    pid
+                }
                 None => {
-                    // No WeChat process — nothing to kill, reset timer
+                    // No WeChat process found — orphaned children may be keeping
+                    // the entrypoint restart loop's `su` blocked. Kill any
+                    // process with /usr/bin/wechat in its cmdline (including
+                    // the wrapping `su`) so the loop can proceed with a restart.
+                    let missing_secs = last_process_seen.elapsed().as_secs();
+                    if missing_secs >= MISSING_PROCESS_TIMEOUT_SECS {
+                        tracing::warn!(
+                            "[health] WeChat process missing for {}s, killing lingering wechat processes to unstick entrypoint restart loop",
+                            missing_secs,
+                        );
+                        let _ = std::process::Command::new("pkill")
+                            .args(["-9", "-f", "/usr/bin/wechat"])
+                            .output();
+                        last_process_seen = Instant::now();
+                    }
                     last_identified = Instant::now();
                     continue;
                 }
