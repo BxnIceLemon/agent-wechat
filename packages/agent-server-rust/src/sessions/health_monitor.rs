@@ -14,6 +14,9 @@ const SCAN_INTERVAL_SECS: u64 = 1;
 /// Kill WeChat if no IA state has been identified for this long (in seconds).
 const UNRESPONSIVE_TIMEOUT_SECS: u64 = 60;
 
+/// Restart WeChat if no process has been found for this long (in seconds).
+const MISSING_PROCESS_TIMEOUT_SECS: u64 = 10;
+
 /// Global flag to pause health monitoring during active execution loops.
 static MONITORING_PAUSED: AtomicBool = AtomicBool::new(false);
 
@@ -29,14 +32,16 @@ pub fn resume_monitoring() {
 
 /// Spawn the background health monitor task.
 ///
-/// Every second, it checks the default session's WeChat process by running
-/// a11y → identify. If no IA state has been identified for more than 60 seconds,
-/// it kills the WeChat process so the entrypoint restart loop can relaunch it.
+/// Every second, it checks the default session's WeChat process:
+/// 1. If WeChat is not running for more than 10 seconds, restart it.
+/// 2. If WeChat is running but no IA state has been identified for more than
+///    60 seconds, kill it so it gets restarted.
 pub fn spawn_health_monitor() {
     tokio::spawn(async move {
         tracing::info!("[health] WeChat health monitor started");
 
         let mut last_identified = Instant::now();
+        let mut last_process_seen = Instant::now();
 
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(SCAN_INTERVAL_SECS)).await;
@@ -44,6 +49,7 @@ pub fn spawn_health_monitor() {
             // Skip if monitoring is paused (an execution loop is active)
             if MONITORING_PAUSED.load(Ordering::Relaxed) {
                 last_identified = Instant::now();
+                last_process_seen = Instant::now();
                 continue;
             }
 
@@ -52,16 +58,35 @@ pub fn spawn_health_monitor() {
                 Some(s) if s.status == "running" => s,
                 _ => {
                     last_identified = Instant::now();
+                    last_process_seen = Instant::now();
                     continue;
                 }
             };
 
             // Check if WeChat process is even running
             let wechat_pid = match find_wechat_pid() {
-                Some(pid) => pid,
+                Some(pid) => {
+                    last_process_seen = Instant::now();
+                    pid
+                }
                 None => {
-                    // No WeChat process — nothing to kill, reset timer
-                    last_identified = Instant::now();
+                    // No WeChat process — check if it's been missing long enough to restart
+                    let missing_secs = last_process_seen.elapsed().as_secs();
+                    if missing_secs >= MISSING_PROCESS_TIMEOUT_SECS {
+                        tracing::warn!(
+                            "[health] WeChat not running for {}s, restarting...",
+                            missing_secs
+                        );
+                        restart_wechat(&session);
+                        last_process_seen = Instant::now();
+                        last_identified = Instant::now();
+                    } else {
+                        tracing::debug!(
+                            "[health] WeChat not running for {}s (restart threshold: {}s)",
+                            missing_secs,
+                            MISSING_PROCESS_TIMEOUT_SECS
+                        );
+                    }
                     continue;
                 }
             };
@@ -95,6 +120,40 @@ pub fn spawn_health_monitor() {
             }
         }
     });
+}
+
+/// Restart WeChat for the given session.
+fn restart_wechat(session: &crate::ia::types::Session) {
+    let display = &session.display;
+    let dbus_address = session.dbus_address.as_deref().unwrap_or("");
+    let linux_user = &session.linux_user;
+    let home_dir = format!("/home/{linux_user}");
+
+    let cmd = format!(
+        "DISPLAY={display} \
+         DBUS_SESSION_BUS_ADDRESS={dbus_address} \
+         QT_ACCESSIBILITY=1 \
+         QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 \
+         QT_AUTO_SCREEN_SCALE_FACTOR=0 \
+         QT_ENABLE_HIGHDPI_SCALING=0 \
+         QT_SCALE_FACTOR=1 \
+         GTK_MODULES=gail:atk-bridge \
+         HOME={home_dir} \
+         /usr/bin/wechat &"
+    );
+
+    let result = std::process::Command::new("su")
+        .args(["-s", "/bin/bash", "-c", &cmd, linux_user.as_str()])
+        .spawn();
+
+    match result {
+        Ok(_) => {
+            tracing::info!("[health] Restarted WeChat for session '{}'", session.name);
+        }
+        Err(e) => {
+            tracing::error!("[health] Failed to restart WeChat: {}", e);
+        }
+    }
 }
 
 /// If time since last identified state exceeds the timeout, kill the WeChat process.
