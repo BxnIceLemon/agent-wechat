@@ -69,10 +69,19 @@ pub fn spawn_health_monitor() {
                     pid
                 }
                 None => {
-                    // No WeChat process found — orphaned children may be keeping
-                    // the entrypoint restart loop's `su` blocked. Kill any
-                    // process with /usr/bin/wechat in its cmdline (including
-                    // the wrapping `su`) so the loop can proceed with a restart.
+                    // No WeChat process found — orphaned children (e.g.
+                    // `wechat --type=renderer`) may be keeping the entrypoint
+                    // restart loop's `su` blocked.  Kill them so the loop can
+                    // proceed with a clean restart.
+                    //
+                    // We use two targeted pkills:
+                    //   1. `pkill -f /usr/bin/wechat` — the main binary and
+                    //      the wrapping `su` (which has /usr/bin/wechat in argv)
+                    //   2. `pkill -f "wechat --type"` — child processes like
+                    //      `wechat --type=renderer`, `wechat --type=gpu-process`
+                    //
+                    // We intentionally avoid `pkill -u wechat` because that
+                    // would also kill fluxbox, at-spi, dbus, dunst, pulseaudio.
                     let missing_secs = last_process_seen.elapsed().as_secs();
                     if missing_secs >= MISSING_PROCESS_TIMEOUT_SECS {
                         tracing::warn!(
@@ -81,6 +90,9 @@ pub fn spawn_health_monitor() {
                         );
                         let _ = std::process::Command::new("pkill")
                             .args(["-9", "-f", "/usr/bin/wechat"])
+                            .output();
+                        let _ = std::process::Command::new("pkill")
+                            .args(["-9", "-f", "wechat --type"])
                             .output();
                         last_process_seen = Instant::now();
                     }
