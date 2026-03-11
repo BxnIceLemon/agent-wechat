@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'packages/**'
+      - 'agent-server-rust/**'
       - 'pnpm-lock.yaml'
       - 'package.json'
       - 'pnpm-workspace.yaml'
@@ -36,7 +37,7 @@ jobs:
               - 'tsconfig.json'
               - '.github/workflows/ci.yml'
             rust:
-              - 'packages/agent-server-rust/**'
+              - 'agent-server-rust/**'
               - '.github/workflows/ci.yml'
 
   ts:
@@ -86,7 +87,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cargo check
-        run: cargo check --manifest-path packages/agent-server-rust/Cargo.toml
+        run: cargo check --manifest-path agent-server-rust/Cargo.toml
 
       - name: Cargo test
-        run: cargo test --manifest-path packages/agent-server-rust/Cargo.toml
+        run: cargo test --manifest-path agent-server-rust/Cargo.toml

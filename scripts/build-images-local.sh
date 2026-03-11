@@ -38,12 +38,12 @@ prepare_build_context() {
   echo "==> Copying agent-server-rust to docker context"
   rm -rf "$DOCKER_DIR/agent-server-rust"
   mkdir -p "$DOCKER_DIR/agent-server-rust"
-  cp "$ROOT_DIR/packages/agent-server-rust/Cargo.toml" "$DOCKER_DIR/agent-server-rust/"
-  if [ -f "$ROOT_DIR/packages/agent-server-rust/Cargo.lock" ]; then
-    cp "$ROOT_DIR/packages/agent-server-rust/Cargo.lock" "$DOCKER_DIR/agent-server-rust/"
+  cp "$ROOT_DIR/agent-server-rust/Cargo.toml" "$DOCKER_DIR/agent-server-rust/"
+  if [ -f "$ROOT_DIR/agent-server-rust/Cargo.lock" ]; then
+    cp "$ROOT_DIR/agent-server-rust/Cargo.lock" "$DOCKER_DIR/agent-server-rust/"
   fi
-  cp -r "$ROOT_DIR/packages/agent-server-rust/src" "$DOCKER_DIR/agent-server-rust/"
-  cp -r "$ROOT_DIR/packages/agent-server-rust/migrations" "$DOCKER_DIR/agent-server-rust/"
+  cp -r "$ROOT_DIR/agent-server-rust/src" "$DOCKER_DIR/agent-server-rust/"
+  cp -r "$ROOT_DIR/agent-server-rust/migrations" "$DOCKER_DIR/agent-server-rust/"
 }
 
 cleanup_build_context() {

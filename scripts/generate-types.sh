@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-RUST_PKG="$ROOT_DIR/packages/agent-server-rust"
+RUST_PKG="$ROOT_DIR/agent-server-rust"
 GENERATED_DIR="$ROOT_DIR/packages/shared/src/types/generated"
 
 echo "Generating TypeScript types from Rust..."
@@ -29,7 +29,7 @@ done
 # Create barrel file that re-exports all generated types
 BARREL="$GENERATED_DIR/index.ts"
 echo "// Auto-generated barrel file — do not edit manually" > "$BARREL"
-echo "// Generated from packages/agent-server-rust/src/ia/types.rs via ts-rs" >> "$BARREL"
+echo "// Generated from agent-server-rust/src/ia/types.rs via ts-rs" >> "$BARREL"
 echo "" >> "$BARREL"
 
 for f in "$GENERATED_DIR"/*.ts; do

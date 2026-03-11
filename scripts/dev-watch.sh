@@ -9,7 +9,7 @@ set -euo pipefail
 #   pnpm dev:watch --container foo     # specify container
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-RUST_DIR="$ROOT_DIR/packages/agent-server-rust"
+RUST_DIR="$ROOT_DIR/agent-server-rust"
 BUILDER_IMAGE="rust:1.93-bookworm"
 CACHE_VOLUME="agent-wechat-cargo-cache"
 

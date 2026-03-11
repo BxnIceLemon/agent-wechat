@@ -18,7 +18,7 @@
     "dev": "bash scripts/dev.sh",
     "dev:watch": "bash scripts/dev-watch.sh",
     "dev:deploy": "bash scripts/dev-deploy.sh",
-    "dev:check": "cd packages/agent-server-rust && cargo watch -x check",
+    "dev:check": "cd agent-server-rust && cargo watch -x check",
     "generate-types": "bash scripts/generate-types.sh",
     "gateway": "pnpm --filter @agent-wechat/wechaty-gateway exec -- node --import tsx src/main.ts",
     "gateway:test": "pnpm --filter @agent-wechat/wechaty-gateway exec -- node --import tsx scripts/test-gateway.ts",

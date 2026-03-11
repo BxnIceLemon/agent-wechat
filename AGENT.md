@@ -50,9 +50,9 @@ This applies to all generated content: source code, comments, docs, PR descripti
 ## Packages
 
 ```
+agent-server-rust/          # Runs INSIDE container — Rust/Axum REST server + FSM engine
 packages/
 ├── shared/              # Types (generated from Rust via ts-rs)
-├── agent-server-rust/   # Runs INSIDE container — Rust/Axum REST server + FSM engine
 └── cli/                 # Runs on HOST — HTTP/WebSocket client
 ```
 
@@ -72,7 +72,7 @@ The login flow uses a **deterministic FSM** instead of an LLM. This is faster, c
 | **Execution** | `src/execution/mod.rs` | Main loop that runs the FSM |
 | **Context** | `src/context/mod.rs` | Persists AppState to SQLite |
 
-All paths above are relative to `packages/agent-server-rust/`.
+All paths above are relative to `agent-server-rust/`.
 
 ### Execution Loop
 
@@ -245,7 +245,7 @@ pnpm build:image:amd64        # Build Docker image (Intel)
 
 ```bash
 pnpm dev:deploy               # Cross-compile Rust server + copy to running container
-cargo check                   # Type check Rust code (from packages/agent-server-rust/)
+cargo check                   # Type check Rust code (from agent-server-rust/)
 pnpm generate-types           # Regenerate TS types from Rust (after changing ts-rs structs)
 pnpm build                    # Rebuild CLI after changes
 ```
@@ -299,8 +299,8 @@ Environment variable `AGENT_WECHAT_TOKEN` overrides the token file on both host 
 
 - **Technology**: SQLite + rusqlite (with bundled SQLCipher) + refinery migrations
 - **Location**: `/data/agent.db` in container (configurable via `AGENT_DB_PATH`)
-- **Schema**: `packages/agent-server-rust/migrations/V1__baseline.sql`
-- **Queries**: `packages/agent-server-rust/src/db/queries.rs`
+- **Schema**: `agent-server-rust/migrations/V1__baseline.sql`
+- **Queries**: `agent-server-rust/src/db/queries.rs`
 
 ### Tables
 
@@ -367,7 +367,7 @@ Chat and message data is read directly from WeChat's local databases using store
 | `src/tools/wechat_messages.rs` | `list_messages()`, `find_message_db()`, `get_msg_table_name()` |
 | `src/tools/wechat_media.rs` | `get_message_media()` — images, emoji, voice |
 
-All paths relative to `packages/agent-server-rust/`.
+All paths relative to `agent-server-rust/`.
 
 ### Databases Read
 

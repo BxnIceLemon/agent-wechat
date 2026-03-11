@@ -37,10 +37,10 @@ jobs:
         run: |
           rm -rf docker/agent-server-rust
           mkdir -p docker/agent-server-rust
-          cp packages/agent-server-rust/Cargo.toml docker/agent-server-rust/
-          [ -f packages/agent-server-rust/Cargo.lock ] && cp packages/agent-server-rust/Cargo.lock docker/agent-server-rust/
-          cp -r packages/agent-server-rust/src docker/agent-server-rust/
-          cp -r packages/agent-server-rust/migrations docker/agent-server-rust/
+          cp agent-server-rust/Cargo.toml docker/agent-server-rust/
+          [ -f agent-server-rust/Cargo.lock ] && cp agent-server-rust/Cargo.lock docker/agent-server-rust/
+          cp -r agent-server-rust/src docker/agent-server-rust/
+          cp -r agent-server-rust/migrations docker/agent-server-rust/
 
       - uses: docker/setup-buildx-action@v3
 

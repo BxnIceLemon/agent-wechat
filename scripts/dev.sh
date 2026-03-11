@@ -84,7 +84,7 @@ for i in {1..30}; do
     echo "Dev workflow:"
     echo "  - Edit Rust code, then run: pnpm dev:deploy"
     echo "  - Tool scripts are live-mounted (edit docker/tools/ directly)"
-    echo "  - Type-check: cd packages/agent-server-rust && cargo watch -x check"
+    echo "  - Type-check: cd agent-server-rust && cargo watch -x check"
     exit 0
   fi
   sleep 1
