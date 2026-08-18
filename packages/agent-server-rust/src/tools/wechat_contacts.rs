@@ -59,7 +59,7 @@ pub fn list_contacts(
         &contact_db,
         contact_key,
         &format!(
-            "SELECT username, nick_name, remark, alias, small_head_url, local_type
+            "SELECT username, nick_name, remark, alias, big_head_url, small_head_url, local_type
              FROM contact
              WHERE local_type IN (1, 3, 5)
                AND username NOT LIKE '%@chatroom'
@@ -97,6 +97,11 @@ pub fn list_contacts(
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())
                     .map(String::from),
+                big_head_url: row
+                    .get("big_head_url")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(String::from),
                 small_head_url: row
                     .get("small_head_url")
                     .and_then(|v| v.as_str())
@@ -126,7 +131,7 @@ pub fn find_contacts(
         &contact_db,
         contact_key,
         &format!(
-            "SELECT username, nick_name, remark, alias, small_head_url, local_type
+            "SELECT username, nick_name, remark, alias, big_head_url, small_head_url, local_type
              FROM contact
              WHERE local_type IN (1, 3, 5)
                AND username NOT LIKE '%@chatroom'
@@ -165,6 +170,11 @@ pub fn find_contacts(
                     .map(String::from),
                 alias: row
                     .get("alias")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(String::from),
+                big_head_url: row
+                    .get("big_head_url")
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())
                     .map(String::from),
