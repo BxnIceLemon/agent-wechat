@@ -300,6 +300,42 @@ pub async fn delete_session(id_or_name: &str) -> Result<(), String> {
 pub async fn initialize_sessions() -> Result<(), String> {
     // Ensure default session exists
     get_or_create_default_session().await?;
+    for session in list_sessions()
+        .into_iter()
+        .filter(|session| session.name != "default")
+    {
+        let user_exists = std::process::Command::new("id")
+            .args(["-u", &session.linux_user])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false);
+        if !user_exists {
+            let output = std::process::Command::new("useradd")
+                .args(["-m", "-s", "/bin/bash", &session.linux_user])
+                .output()
+                .map_err(|error| format!("Failed to restore session user: {error}"))?;
+            if !output.status.success() {
+                return Err(format!(
+                    "Failed to restore session user {}: {}",
+                    session.linux_user,
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+        }
+        if matches!(session.status.as_str(), "running" | "starting")
+            && crate::tools::wechat_db::find_wechat_pid_for_user(&session.linux_user).is_none()
+        {
+            {
+                let db = get_db();
+                db.execute(
+                    "UPDATE sessions SET status = 'stopped', dbus_address = NULL, xvfb_pid = NULL, wechat_pid = NULL, dbus_pid = NULL WHERE id = ?1",
+                    params![&session.id],
+                )
+                .map_err(|error| format!("Failed to reset session state: {error}"))?;
+            }
+            start_session(&session.id).await?;
+        }
+    }
     tracing::info!("[SessionManager] Default session ready");
     Ok(())
 }
