@@ -10,11 +10,11 @@ use crate::db::get_db;
 use crate::execution::run_execution_loop;
 use crate::ia::types::{MediaResult, Message, SendResult, SubscriptionEvent};
 use crate::plans::send_message::{SendMessageParams, SendMessagePlan};
-use crate::tools::wechat_db::{find_wechat_pid, list_account_dbs};
-use crate::tools::wechat_keys::{extract_keys_async, get_stored_keys, get_image_keys, store_keys};
+use crate::router::session::ActiveSession;
+use crate::tools::wechat_db::{find_wechat_pid_for_user, list_account_dbs};
+use crate::tools::wechat_keys::{extract_keys_async, get_image_keys, get_stored_keys, store_keys};
 use crate::tools::wechat_media::get_message_media;
 use crate::tools::wechat_messages;
-use crate::sessions::manager::get_session;
 
 #[derive(Deserialize)]
 pub struct ListParams {
@@ -29,13 +29,10 @@ fn default_limit() -> i64 {
 }
 
 pub async fn list_messages(
+    ActiveSession(session): ActiveSession,
     Path(chat_id): Path<String>,
     Query(params): Query<ListParams>,
 ) -> Json<Vec<Message>> {
-    let session = match get_session("default") {
-        Some(s) => s,
-        None => return Json(Vec::new()),
-    };
     let logged_in_user = match &session.logged_in_user {
         Some(u) => u.clone(),
         None => return Json(Vec::new()),
@@ -56,7 +53,7 @@ pub async fn list_messages(
             && !keys.contains_key(name.as_str())
     });
     if has_missing_message_db {
-        if let Some(pid) = find_wechat_pid() {
+        if let Some(pid) = find_wechat_pid_for_user(&session.linux_user) {
             let extracted = extract_keys_async(pid).await;
             if !extracted.is_empty() {
                 let db = get_db();
@@ -66,7 +63,12 @@ pub async fn list_messages(
         }
     }
 
-    if !keys.keys().any(|k| k.starts_with("message_") && k.ends_with(".db") && !k.contains("fts") && !k.contains("resource")) {
+    if !keys.keys().any(|k| {
+        k.starts_with("message_")
+            && k.ends_with(".db")
+            && !k.contains("fts")
+            && !k.contains("resource")
+    }) {
         return Json(Vec::new());
     }
 
@@ -79,19 +81,10 @@ pub async fn list_messages(
     ))
 }
 
-pub async fn get_media(Path((chat_id, local_id)): Path<(String, i64)>) -> Json<MediaResult> {
-    let session = match get_session("default") {
-        Some(s) => s,
-        None => {
-            return Json(MediaResult {
-                media_type: "unsupported".to_string(),
-                data: None,
-                url: None,
-                format: String::new(),
-                filename: String::new(),
-            })
-        }
-    };
+pub async fn get_media(
+    ActiveSession(session): ActiveSession,
+    Path((chat_id, local_id)): Path<(String, i64)>,
+) -> Json<MediaResult> {
     let logged_in_user = match &session.logged_in_user {
         Some(u) => u.clone(),
         None => {
@@ -116,7 +109,7 @@ pub async fn get_media(Path((chat_id, local_id)): Path<(String, i64)>) -> Json<M
         name.starts_with("media_") && name.ends_with(".db") && !keys.contains_key(name.as_str())
     });
     if has_missing_media {
-        if let Some(pid) = find_wechat_pid() {
+        if let Some(pid) = find_wechat_pid_for_user(&session.linux_user) {
             let extracted = extract_keys_async(pid).await;
             if !extracted.is_empty() {
                 let db = get_db();
@@ -162,23 +155,16 @@ pub struct FileInput {
     filename: String,
 }
 
-pub async fn send_message(Json(input): Json<SendParams>) -> Json<SendResult> {
+pub async fn send_message(
+    ActiveSession(session): ActiveSession,
+    Json(input): Json<SendParams>,
+) -> Json<SendResult> {
     if input.text.is_none() && input.image.is_none() && input.file.is_none() {
         return Json(SendResult {
             success: false,
             error: Some("No text, image, or file provided".to_string()),
         });
     }
-
-    let session = match get_session("default") {
-        Some(s) => s,
-        None => {
-            return Json(SendResult {
-                success: false,
-                error: Some("No session available".to_string()),
-            })
-        }
-    };
 
     if session.logged_in_user.is_none() {
         return Json(SendResult {
@@ -196,9 +182,17 @@ pub async fn send_message(Json(input): Json<SendParams>) -> Json<SendResult> {
             "image/gif" => ".gif",
             _ => ".png",
         };
-        let path = format!("/tmp/send_image_{}{}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(), ext);
-        if let Ok(bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &img.data) {
+        let path = format!(
+            "/tmp/send_image_{}{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+            ext
+        );
+        if let Ok(bytes) =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &img.data)
+        {
             if std::fs::write(&path, &bytes).is_ok() {
                 image_mime = Some(img.mime_type.clone());
                 image_path = Some(path);
@@ -214,18 +208,30 @@ pub async fn send_message(Json(input): Json<SendParams>) -> Json<SendResult> {
         // path stays portable across locales.  The dot is preserved so that
         // file extensions survive (e.g. "遗憾.pdf" → "__.pdf"); the mangled
         // stem is acceptable since this is a transient temp path.
-        let safe_name: String = f.filename.chars().map(|c| {
-            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        }).collect();
-        let path = format!("/tmp/send_file_{}_{}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(), safe_name);
+        let safe_name: String = f
+            .filename
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        let path = format!(
+            "/tmp/send_file_{}_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+            safe_name
+        );
         match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &f.data) {
             Ok(bytes) => match std::fs::write(&path, &bytes) {
-                Ok(_) => { file_path = Some(path); }
+                Ok(_) => {
+                    file_path = Some(path);
+                }
                 Err(e) => {
                     return Json(SendResult {
                         success: false,

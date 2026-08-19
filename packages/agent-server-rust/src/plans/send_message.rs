@@ -47,9 +47,9 @@ fn find_edit_near_send<'a>(
 
 fn find_edit_send_pair(node: &A11yNode) -> Option<(&A11yNode, &A11yNode)> {
     if let Some(children) = &node.children {
-        let send_btn = children.iter().find(|c| {
-            c.role == "push-button" && c.name == "Send(S)"
-        });
+        let send_btn = children
+            .iter()
+            .find(|c| c.role == "push-button" && c.name == "Send(S)");
         let edit_node = children.iter().find(|c| {
             c.role == "text"
                 && c.states
@@ -77,7 +77,9 @@ impl Plan for SendMessagePlan {
     type PlanState = SendMessagePlanState;
     type Params = SendMessageParams;
 
-    fn id(&self) -> &str { "send_message" }
+    fn id(&self) -> &str {
+        "send_message"
+    }
 
     fn initial_plan_state(&self) -> SendMessagePlanState {
         SendMessagePlanState {
@@ -98,7 +100,7 @@ impl Plan for SendMessagePlan {
         identified: &IdentifiedStates,
         plan_state: &mut SendMessagePlanState,
         a11y: &A11yNode,
-        _session_id: &str,
+        session_id: &str,
     ) -> Option<SelectedAction> {
         let main_state_id = identified.main_window.as_ref().map(|m| m.state_id.as_str());
 
@@ -106,7 +108,10 @@ impl Plan for SendMessagePlan {
         if state.popup.is_some() && identified.popup.is_some() {
             return Some(SelectedAction {
                 action: actions::dismiss_popup(),
-                frame: identified.main_window.as_ref().and_then(|m| m.frame.clone()),
+                frame: identified
+                    .main_window
+                    .as_ref()
+                    .and_then(|m| m.frame.clone()),
             });
         }
 
@@ -119,14 +124,16 @@ impl Plan for SendMessagePlan {
 
                     let chat_list_item = query_selector(a11y, r#"list[name="Chats"] > list-item"#);
                     let click_xy = chat_list_item.and_then(|item| {
-                        item.bounds.as_ref().map(|b| (
-                            (b.x + b.width / 2.0).round(),
-                            (b.y + b.height / 2.0).round(),
-                        ))
+                        item.bounds.as_ref().map(|b| {
+                            (
+                                (b.x + b.width / 2.0).round(),
+                                (b.y + b.height / 2.0).round(),
+                            )
+                        })
                     });
 
                     let force = main_state_id == Some("chat");
-                    let result = open_chat(&params.chat_id, force, click_xy).await;
+                    let result = open_chat(&params.chat_id, force, click_xy, session_id).await;
 
                     if !result.ok {
                         return None;
@@ -139,7 +146,10 @@ impl Plan for SendMessagePlan {
                     if !skipped {
                         return Some(SelectedAction {
                             action: actions::wait_short(),
-                            frame: identified.main_window.as_ref().and_then(|m| m.frame.clone()),
+                            frame: identified
+                                .main_window
+                                .as_ref()
+                                .and_then(|m| m.frame.clone()),
                         });
                     }
                     continue;
@@ -171,7 +181,10 @@ impl Plan for SendMessagePlan {
                     if let Some(bounds) = &edit_node.bounds {
                         return Some(SelectedAction {
                             action: actions::click_bounds(bounds),
-                            frame: identified.main_window.as_ref().and_then(|m| m.frame.clone()),
+                            frame: identified
+                                .main_window
+                                .as_ref()
+                                .and_then(|m| m.frame.clone()),
                         });
                     }
                     return None;
@@ -187,13 +200,23 @@ impl Plan for SendMessagePlan {
 
                     // File
                     if let Some(fp) = &params.file_path {
-                        exec_command("paste-file", &[fp], &ExecOptions::default()).await;
+                        exec_command(
+                            "paste-file",
+                            &[fp],
+                            &ExecOptions::for_session_id(session_id),
+                        )
+                        .await;
                         return Some(SelectedAction {
                             action: actions::sequence(vec![
                                 Action::Wait { ms: 100 },
-                                Action::Key { combo: "Return".to_string() },
+                                Action::Key {
+                                    combo: "Return".to_string(),
+                                },
                             ]),
-                            frame: identified.main_window.as_ref().and_then(|m| m.frame.clone()),
+                            frame: identified
+                                .main_window
+                                .as_ref()
+                                .and_then(|m| m.frame.clone()),
                         });
                     }
 
@@ -203,13 +226,23 @@ impl Plan for SendMessagePlan {
                         if let Some(mime) = &params.image_mime {
                             args.push(mime);
                         }
-                        exec_command("paste-image", &args, &ExecOptions::default()).await;
+                        exec_command(
+                            "paste-image",
+                            &args,
+                            &ExecOptions::for_session_id(session_id),
+                        )
+                        .await;
                         return Some(SelectedAction {
                             action: actions::sequence(vec![
                                 Action::Wait { ms: 100 },
-                                Action::Key { combo: "Return".to_string() },
+                                Action::Key {
+                                    combo: "Return".to_string(),
+                                },
                             ]),
-                            frame: identified.main_window.as_ref().and_then(|m| m.frame.clone()),
+                            frame: identified
+                                .main_window
+                                .as_ref()
+                                .and_then(|m| m.frame.clone()),
                         });
                     }
 
@@ -217,12 +250,22 @@ impl Plan for SendMessagePlan {
                     if let Some(msg) = &params.message {
                         return Some(SelectedAction {
                             action: actions::sequence(vec![
-                                Action::Key { combo: "ctrl+a".to_string() },
-                                Action::Type { text: msg.clone(), selector: None },
+                                Action::Key {
+                                    combo: "ctrl+a".to_string(),
+                                },
+                                Action::Type {
+                                    text: msg.clone(),
+                                    selector: None,
+                                },
                                 Action::Wait { ms: 100 },
-                                Action::Key { combo: "Return".to_string() },
+                                Action::Key {
+                                    combo: "Return".to_string(),
+                                },
                             ]),
-                            frame: identified.main_window.as_ref().and_then(|m| m.frame.clone()),
+                            frame: identified
+                                .main_window
+                                .as_ref()
+                                .and_then(|m| m.frame.clone()),
                         });
                     }
 
@@ -246,7 +289,10 @@ impl Plan for SendMessagePlan {
                         plan_state.phase = SendMessagePhase::Done;
                         return Some(SelectedAction {
                             action: actions::wait_short(),
-                            frame: identified.main_window.as_ref().and_then(|m| m.frame.clone()),
+                            frame: identified
+                                .main_window
+                                .as_ref()
+                                .and_then(|m| m.frame.clone()),
                         });
                     }
 
@@ -257,7 +303,10 @@ impl Plan for SendMessagePlan {
 
                     return Some(SelectedAction {
                         action: actions::wait_short(),
-                        frame: identified.main_window.as_ref().and_then(|m| m.frame.clone()),
+                        frame: identified
+                            .main_window
+                            .as_ref()
+                            .and_then(|m| m.frame.clone()),
                     });
                 }
 

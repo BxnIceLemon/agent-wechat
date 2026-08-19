@@ -1,6 +1,7 @@
 use axum::{extract::Query, Json};
 use serde::{Deserialize, Serialize};
 
+use crate::router::session::ActiveSession;
 use crate::tools::a11y::{get_a11y_desktop, tree_to_aria};
 use crate::tools::exec::ExecOptions;
 use crate::tools::screenshot::capture_screenshot;
@@ -10,10 +11,13 @@ pub struct ScreenshotResponse {
     base64: String,
 }
 
-pub async fn screenshot() -> Json<ScreenshotResponse> {
-    let b64 = capture_screenshot(&ExecOptions::default())
-        .await
-        .unwrap_or_default();
+pub async fn screenshot(ActiveSession(session): ActiveSession) -> Json<ScreenshotResponse> {
+    let b64 = capture_screenshot(&ExecOptions {
+        session: Some(session),
+        timeout_ms: 60_000,
+    })
+    .await
+    .unwrap_or_default();
     Json(ScreenshotResponse { base64: b64 })
 }
 
@@ -37,8 +41,15 @@ pub struct A11yResponse {
     error: Option<String>,
 }
 
-pub async fn a11y(Query(params): Query<A11yParams>) -> Json<A11yResponse> {
-    let result = get_a11y_desktop(&ExecOptions::default()).await;
+pub async fn a11y(
+    Query(params): Query<A11yParams>,
+    ActiveSession(session): ActiveSession,
+) -> Json<A11yResponse> {
+    let result = get_a11y_desktop(&ExecOptions {
+        session: Some(session),
+        timeout_ms: 60_000,
+    })
+    .await;
 
     match result {
         Ok(tree) => {

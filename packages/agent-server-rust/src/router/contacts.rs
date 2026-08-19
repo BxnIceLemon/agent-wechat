@@ -3,9 +3,9 @@ use serde::Deserialize;
 
 use crate::db::get_db;
 use crate::ia::types::Contact;
-use crate::sessions::manager::get_session;
+use crate::router::session::ActiveSession;
 use crate::tools::wechat_contacts;
-use crate::tools::wechat_db::{find_wechat_pid, list_account_dbs};
+use crate::tools::wechat_db::{find_wechat_pid_for_user, list_account_dbs};
 use crate::tools::wechat_keys::{extract_keys_async, get_stored_keys, store_keys};
 
 #[derive(Deserialize)]
@@ -20,11 +20,10 @@ fn default_limit() -> i64 {
     200
 }
 
-pub async fn list_contacts(Query(params): Query<ListParams>) -> Json<Vec<Contact>> {
-    let session = match get_session("default") {
-        Some(s) => s,
-        None => return Json(Vec::new()),
-    };
+pub async fn list_contacts(
+    ActiveSession(session): ActiveSession,
+    Query(params): Query<ListParams>,
+) -> Json<Vec<Contact>> {
     let logged_in_user = match &session.logged_in_user {
         Some(u) => u.clone(),
         None => return Json(Vec::new()),
@@ -39,7 +38,7 @@ pub async fn list_contacts(Query(params): Query<ListParams>) -> Json<Vec<Contact
     if !keys.contains_key("contact.db") {
         let on_disk = list_account_dbs(&logged_in_user);
         if on_disk.iter().any(|name| name == "contact.db") {
-            if let Some(pid) = find_wechat_pid() {
+            if let Some(pid) = find_wechat_pid_for_user(&session.linux_user) {
                 let extracted = extract_keys_async(pid).await;
                 if !extracted.is_empty() {
                     let db = get_db();
@@ -67,11 +66,10 @@ pub struct FindParams {
     name: String,
 }
 
-pub async fn find_contacts(Query(params): Query<FindParams>) -> Json<Vec<Contact>> {
-    let session = match get_session("default") {
-        Some(s) => s,
-        None => return Json(Vec::new()),
-    };
+pub async fn find_contacts(
+    ActiveSession(session): ActiveSession,
+    Query(params): Query<FindParams>,
+) -> Json<Vec<Contact>> {
     let logged_in_user = match &session.logged_in_user {
         Some(u) => u.clone(),
         None => return Json(Vec::new()),
@@ -86,7 +84,7 @@ pub async fn find_contacts(Query(params): Query<FindParams>) -> Json<Vec<Contact
     if !keys.contains_key("contact.db") {
         let on_disk = list_account_dbs(&logged_in_user);
         if on_disk.iter().any(|name| name == "contact.db") {
-            if let Some(pid) = find_wechat_pid() {
+            if let Some(pid) = find_wechat_pid_for_user(&session.linux_user) {
                 let extracted = extract_keys_async(pid).await;
                 if !extracted.is_empty() {
                     let db = get_db();

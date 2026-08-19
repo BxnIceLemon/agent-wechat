@@ -9,7 +9,6 @@ use axum::{
 use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
-use base64::Engine;
 use crate::context::create_context;
 use crate::db::get_db;
 use crate::execution::run_execution_loop;
@@ -17,16 +16,17 @@ use crate::ia::types::*;
 use crate::ia::{find_state_by_id, identify_states};
 use crate::plans::login::{LoginParams, LoginPlan};
 use crate::plans::logout::{LogoutParams, LogoutPlan};
-use crate::sessions::manager::get_session;
+use crate::router::session::ActiveSession;
 use crate::tools::a11y::get_a11y_desktop;
 use crate::tools::exec::ExecOptions;
 use crate::tools::qr::{decode_qr_from_base64, to_data_url};
 use crate::tools::screenshot::capture_screenshot;
+use base64::Engine;
 
-pub async fn get_status() -> Json<serde_json::Value> {
+pub async fn get_status(ActiveSession(session): ActiveSession) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "container": "running",
-        "loginState": { "status": "logged_out" },
+        "loginState": { "status": session.login_state },
         "version": "0.1.0"
     }))
 }
@@ -35,18 +35,10 @@ pub async fn get_status() -> Json<serde_json::Value> {
 ///
 /// Gets the a11y tree, identifies the current state, and runs
 /// the reducer. Chat states set `is_logged_in = true`.
-pub async fn auth_status() -> Json<serde_json::Value> {
-    let session = match get_session("default") {
-        Some(s) => s,
-        None => {
-            return Json(serde_json::json!({
-                "status": "unknown",
-            }))
-        }
-    };
-
+pub async fn auth_status(ActiveSession(session): ActiveSession) -> Json<serde_json::Value> {
     // Check if WeChat process is running first
-    let wechat_running = crate::tools::wechat_db::find_wechat_pid().is_some();
+    let wechat_running =
+        crate::tools::wechat_db::find_wechat_pid_for_user(&session.linux_user).is_some();
     if !wechat_running {
         return Json(serde_json::json!({
             "status": "app_not_running",
@@ -70,9 +62,7 @@ pub async fn auth_status() -> Json<serde_json::Value> {
         }
     };
 
-    let screenshot = capture_screenshot(&exec_options)
-        .await
-        .unwrap_or_default();
+    let screenshot = capture_screenshot(&exec_options).await.unwrap_or_default();
     let identified = identify_states(&a11y, &screenshot);
 
     // Load persisted state and apply reduce
@@ -112,24 +102,22 @@ pub async fn auth_status() -> Json<serde_json::Value> {
         status
     );
 
+    let qr_code_data_url = (status == "logged_out")
+        .then(|| decode_qr_from_base64(&screenshot))
+        .flatten()
+        .and_then(|qr| to_data_url(&qr.data).ok());
+
     Json(serde_json::json!({
         "status": status,
         "loggedInUser": session.logged_in_user,
+        "qrCodeDataUrl": qr_code_data_url,
+        "loginHint": "请使用手机微信扫码，并在手机上确认登录。",
+        "autoLoginControl": "phone_only",
     }))
 }
 
 /// Log out of WeChat via FSM execution loop.
-pub async fn logout() -> Json<serde_json::Value> {
-    let session = match get_session("default") {
-        Some(s) => s,
-        None => {
-            return Json(serde_json::json!({
-                "success": false,
-                "error": "No session available"
-            }))
-        }
-    };
-
+pub async fn logout(ActiveSession(session): ActiveSession) -> Json<serde_json::Value> {
     // Quick auth check first
     let exec_options = ExecOptions {
         session: Some(session.clone()),
@@ -194,8 +182,12 @@ pub async fn logout() -> Json<serde_json::Value> {
     }))
 }
 
-pub async fn login() -> Json<serde_json::Value> {
-    let screenshot = capture_screenshot(&ExecOptions::default()).await;
+pub async fn login(ActiveSession(session): ActiveSession) -> Json<serde_json::Value> {
+    let screenshot = capture_screenshot(&ExecOptions {
+        session: Some(session),
+        timeout_ms: 30_000,
+    })
+    .await;
 
     match screenshot {
         Ok(b64) => {
@@ -235,23 +227,12 @@ fn default_timeout() -> u64 {
 pub async fn login_ws(
     ws: WebSocketUpgrade,
     Query(params): Query<LoginWsParams>,
+    ActiveSession(session): ActiveSession,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_login_ws(socket, params))
+    ws.on_upgrade(move |socket| handle_login_ws(socket, params, session))
 }
 
-async fn handle_login_ws(mut socket: WebSocket, params: LoginWsParams) {
-    let session = match get_session("default") {
-        Some(s) => s,
-        None => {
-            let msg = serde_json::to_string(&LoginSubscriptionEvent::Error {
-                message: "No session available".to_string(),
-            })
-            .unwrap();
-            let _ = socket.send(Message::Text(msg.into())).await;
-            return;
-        }
-    };
-
+async fn handle_login_ws(mut socket: WebSocket, params: LoginWsParams, session: Session) {
     // Send initial status
     let msg = serde_json::to_string(&LoginSubscriptionEvent::Status {
         message: "Navigating login flow...".to_string(),
@@ -279,7 +260,9 @@ async fn handle_login_ws(mut socket: WebSocket, params: LoginWsParams) {
         let emit = move |event: SubscriptionEvent| {
             let _ = tx.send(event);
         };
-        run_execution_loop(&plan, &login_params, &mut context, &emit, cancel_for_exec).await.0
+        run_execution_loop(&plan, &login_params, &mut context, &emit, cancel_for_exec)
+            .await
+            .0
     });
 
     // Main loop: bridge events to WebSocket, handle timeout + disconnect
@@ -335,7 +318,9 @@ async fn handle_login_ws(mut socket: WebSocket, params: LoginWsParams) {
     let exec_result = exec_handle.await.ok();
     if !client_disconnected && !sent_terminal {
         let fallback = match exec_result {
-            Some(result) if result.success => LoginSubscriptionEvent::LoginSuccess { user_id: None },
+            Some(result) if result.success => {
+                LoginSubscriptionEvent::LoginSuccess { user_id: None }
+            }
             Some(result) => {
                 let message = result.error.unwrap_or_else(|| "Login failed".to_string());
                 if message.starts_with("Unknown state for")

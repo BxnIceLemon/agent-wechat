@@ -21,6 +21,7 @@ pub async fn open_chat(
     chat_id: &str,
     force: bool,
     click_xy: Option<(f64, f64)>,
+    session_id: &str,
 ) -> OpenChatResult {
     let mut args: Vec<String> = Vec::new();
 
@@ -42,7 +43,7 @@ pub async fn open_chat(
     let result = exec_command(
         "chat-select",
         &args_ref,
-        &ExecOptions::default(),
+        &ExecOptions::for_session_id(session_id),
     )
     .await;
 

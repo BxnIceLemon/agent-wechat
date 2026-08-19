@@ -2,7 +2,7 @@ use super::Plan;
 use crate::db::{get_db, queries};
 use crate::ia::actions;
 use crate::ia::types::*;
-use crate::tools::wechat_db::{find_account_dir, find_wechat_pid};
+use crate::tools::wechat_db::{find_account_dir, find_wechat_pid_for_user};
 use crate::tools::wechat_keys::{extract_keys_async, needs_key_extraction, store_keys};
 use rusqlite::params;
 
@@ -35,7 +35,9 @@ impl Plan for LoginPlan {
     type PlanState = LoginPlanState;
     type Params = LoginParams;
 
-    fn id(&self) -> &str { "login" }
+    fn id(&self) -> &str {
+        "login"
+    }
 
     fn initial_plan_state(&self) -> LoginPlanState {
         LoginPlanState {
@@ -64,7 +66,12 @@ impl Plan for LoginPlan {
         _a11y: &A11yNode,
         session_id: &str,
     ) -> Option<SelectedAction> {
-        let frame = || identified.main_window.as_ref().and_then(|m| m.frame.clone());
+        let frame = || {
+            identified
+                .main_window
+                .as_ref()
+                .and_then(|m| m.frame.clone())
+        };
 
         // Dismiss popups first
         if state.popup.is_some() && identified.popup.is_some() {
@@ -75,15 +82,14 @@ impl Plan for LoginPlan {
         }
 
         match plan_state.phase.clone() {
-            LoginPhase::Initializing => {
-                handle_initializing(state, params, plan_state, &frame)
-            }
-            LoginPhase::Authenticating => {
-                handle_authenticating(state, params, plan_state, &frame)
-            }
+            LoginPhase::Initializing => handle_initializing(state, params, plan_state, &frame),
+            LoginPhase::Authenticating => handle_authenticating(state, params, plan_state, &frame),
             LoginPhase::Maximizing => {
                 plan_state.phase = LoginPhase::DetectingUser;
-                Some(SelectedAction { action: actions::wait(500), frame: None })
+                Some(SelectedAction {
+                    action: actions::wait(500),
+                    frame: None,
+                })
             }
             LoginPhase::DetectingUser => {
                 handle_detecting_user(state, plan_state, session_id, frame()).await
@@ -91,9 +97,10 @@ impl Plan for LoginPlan {
             LoginPhase::ExtractingKeys => {
                 handle_extracting_keys(plan_state, session_id, frame()).await
             }
-            LoginPhase::Done => {
-                Some(SelectedAction { action: actions::wait_short(), frame: None })
-            }
+            LoginPhase::Done => Some(SelectedAction {
+                action: actions::wait_short(),
+                frame: None,
+            }),
         }
     }
 }
@@ -116,7 +123,10 @@ fn handle_initializing(
             } else {
                 actions::click_back()
             };
-            Some(SelectedAction { action, frame: frame() })
+            Some(SelectedAction {
+                action,
+                frame: frame(),
+            })
         }
         _ => {
             plan_state.phase = LoginPhase::Authenticating;
@@ -142,9 +152,12 @@ fn handle_authenticating(
                             Action::Emit {
                                 event: SubscriptionEvent {
                                     event_type: "qr".to_string(),
-                                    data: [
-                                        ("qrData".to_string(), serde_json::Value::String(qr.clone())),
-                                    ].into_iter().collect(),
+                                    data: [(
+                                        "qrData".to_string(),
+                                        serde_json::Value::String(qr.clone()),
+                                    )]
+                                    .into_iter()
+                                    .collect(),
                                 },
                             },
                             actions::wait(500),
@@ -153,7 +166,10 @@ fn handle_authenticating(
                     });
                 }
             }
-            Some(SelectedAction { action: actions::wait(500), frame: None })
+            Some(SelectedAction {
+                action: actions::wait(500),
+                frame: None,
+            })
         }
 
         MainWindowView::LoginAccount => {
@@ -162,7 +178,10 @@ fn handle_authenticating(
             } else {
                 actions::click_login()
             };
-            Some(SelectedAction { action, frame: frame() })
+            Some(SelectedAction {
+                action,
+                frame: frame(),
+            })
         }
 
         MainWindowView::LoginPhoneConfirm => {
@@ -175,8 +194,12 @@ fn handle_authenticating(
                                 event_type: "phone_confirm".to_string(),
                                 data: [(
                                     "message".to_string(),
-                                    serde_json::Value::String("Please confirm login on your phone".to_string()),
-                                )].into_iter().collect(),
+                                    serde_json::Value::String(
+                                        "Please confirm login on your phone".to_string(),
+                                    ),
+                                )]
+                                .into_iter()
+                                .collect(),
                             },
                         },
                         actions::wait(500),
@@ -184,12 +207,16 @@ fn handle_authenticating(
                     frame: frame(),
                 });
             }
-            Some(SelectedAction { action: actions::wait(500), frame: None })
+            Some(SelectedAction {
+                action: actions::wait(500),
+                frame: None,
+            })
         }
 
-        MainWindowView::LoginLoading => {
-            Some(SelectedAction { action: actions::wait(500), frame: None })
-        }
+        MainWindowView::LoginLoading => Some(SelectedAction {
+            action: actions::wait(500),
+            frame: None,
+        }),
 
         MainWindowView::Chat | MainWindowView::ChatOpen => {
             plan_state.phase = LoginPhase::Maximizing;
@@ -210,7 +237,10 @@ fn handle_authenticating(
             } else {
                 actions::click_back()
             };
-            Some(SelectedAction { action, frame: frame() })
+            Some(SelectedAction {
+                action,
+                frame: frame(),
+            })
         }
     }
 }
@@ -221,28 +251,22 @@ async fn handle_detecting_user(
     session_id: &str,
     frame: Option<FrameHint>,
 ) -> Option<SelectedAction> {
-    if !matches!(state.main_window.view, MainWindowView::Chat | MainWindowView::ChatOpen) {
-        return Some(SelectedAction { action: actions::wait(500), frame: None });
+    if !matches!(
+        state.main_window.view,
+        MainWindowView::Chat | MainWindowView::ChatOpen
+    ) {
+        return Some(SelectedAction {
+            action: actions::wait(500),
+            frame: None,
+        });
     }
 
-    // All DB access is scoped in blocks so MutexGuard is dropped before any await
-    let (mut wechat_pid, mut account_dir) = {
-        let db = get_db();
-        let pid: Option<i64> = db
-            .query_row(
-                "SELECT wechat_pid FROM sessions WHERE id = ?1",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .ok()
-            .flatten();
-
-        let acct = pid.and_then(|p| find_account_dir(p));
-        (pid, acct)
-    };
+    let session = crate::sessions::manager::get_session(session_id)?;
+    let mut wechat_pid = session.wechat_pid;
+    let mut account_dir = wechat_pid.and_then(find_account_dir);
 
     if account_dir.is_none() {
-        wechat_pid = find_wechat_pid();
+        wechat_pid = find_wechat_pid_for_user(&session.linux_user);
         if let Some(pid) = wechat_pid {
             account_dir = find_account_dir(pid);
             let db = get_db();
@@ -250,7 +274,8 @@ async fn handle_detecting_user(
             db.execute(
                 "UPDATE sessions SET wechat_pid = ?1, updated_at = ?2 WHERE id = ?3",
                 params![pid, now, session_id],
-            ).ok();
+            )
+            .ok();
         }
     }
 
@@ -272,10 +297,9 @@ async fn handle_detecting_user(
                         Action::Emit {
                             event: SubscriptionEvent {
                                 event_type: "login_success".to_string(),
-                                data: [(
-                                    "userId".to_string(),
-                                    serde_json::Value::String(acct),
-                                )].into_iter().collect(),
+                                data: [("userId".to_string(), serde_json::Value::String(acct))]
+                                    .into_iter()
+                                    .collect(),
                             },
                         },
                         actions::wait_short(),
@@ -293,8 +317,12 @@ async fn handle_detecting_user(
                         event_type: "status".to_string(),
                         data: [(
                             "message".to_string(),
-                            serde_json::Value::String("Getting your WeChat messages...".to_string()),
-                        )].into_iter().collect(),
+                            serde_json::Value::String(
+                                "Getting your WeChat messages...".to_string(),
+                            ),
+                        )]
+                        .into_iter()
+                        .collect(),
                     },
                 },
                 actions::wait_short(),
@@ -320,7 +348,10 @@ async fn handle_detecting_user(
         });
     }
 
-    Some(SelectedAction { action: actions::wait(2000), frame: None })
+    Some(SelectedAction {
+        action: actions::wait(2000),
+        frame: None,
+    })
 }
 
 async fn handle_extracting_keys(
@@ -329,6 +360,7 @@ async fn handle_extracting_keys(
     frame: Option<FrameHint>,
 ) -> Option<SelectedAction> {
     let wechat_pid: Option<i64> = {
+        let session = crate::sessions::manager::get_session(session_id);
         let db = get_db();
         db.query_row(
             "SELECT wechat_pid FROM sessions WHERE id = ?1",
@@ -337,7 +369,7 @@ async fn handle_extracting_keys(
         )
         .ok()
         .flatten()
-        .or_else(|| find_wechat_pid())
+        .or_else(|| session.and_then(|s| find_wechat_pid_for_user(&s.linux_user)))
     };
 
     if let (Some(pid), Some(acct)) = (wechat_pid, plan_state.account_dir.clone()) {
@@ -358,11 +390,14 @@ async fn handle_extracting_keys(
             Action::Emit {
                 event: SubscriptionEvent {
                     event_type: "login_success".to_string(),
-                    data: plan_state.account_dir.as_ref()
-                        .map(|a| [(
-                            "userId".to_string(),
-                            serde_json::Value::String(a.clone()),
-                        )].into_iter().collect())
+                    data: plan_state
+                        .account_dir
+                        .as_ref()
+                        .map(|a| {
+                            [("userId".to_string(), serde_json::Value::String(a.clone()))]
+                                .into_iter()
+                                .collect()
+                        })
                         .unwrap_or_default(),
                 },
             },

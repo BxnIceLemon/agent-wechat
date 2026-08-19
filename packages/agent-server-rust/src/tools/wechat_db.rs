@@ -8,11 +8,7 @@ use std::process::Command;
 /// that could interfere with WeChat's own writes. Since we open a fresh
 /// connection per query and drop it immediately, immutable mode is safe —
 /// we always see the latest committed state at open time.
-pub fn query_wechat_db(
-    db_path: &str,
-    hex_key: &str,
-    sql: &str,
-) -> Vec<Value> {
+pub fn query_wechat_db(db_path: &str, hex_key: &str, sql: &str) -> Vec<Value> {
     let uri = format!("file:{}?immutable=1", db_path);
     let conn = match Connection::open_with_flags(
         &uri,
@@ -42,11 +38,7 @@ pub fn query_wechat_db(
         }
     };
 
-    let col_names: Vec<String> = stmt
-        .column_names()
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
 
     let rows = stmt.query_map([], |row| {
         let mut map = Map::new();
@@ -86,11 +78,8 @@ pub fn query_wechat_db(
 }
 
 /// Find the WeChat process PID.
-pub fn find_wechat_pid() -> Option<i64> {
-    let output = Command::new("pgrep")
-        .args(["-f", "/usr/bin/wechat"])
-        .output()
-        .ok()?;
+fn find_wechat_pid_with_args(args: &[&str]) -> Option<i64> {
+    let output = Command::new("pgrep").args(args).output().ok()?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let pids: Vec<i64> = stdout
@@ -114,6 +103,16 @@ pub fn find_wechat_pid() -> Option<i64> {
     }
 
     best_pid
+}
+
+/// Find the most active WeChat process across all users.
+pub fn find_wechat_pid() -> Option<i64> {
+    find_wechat_pid_with_args(&["-f", "/usr/bin/wechat"])
+}
+
+/// Find the most active WeChat process owned by a session's Linux user.
+pub fn find_wechat_pid_for_user(linux_user: &str) -> Option<i64> {
+    find_wechat_pid_with_args(&["-u", linux_user, "-f", "/usr/bin/wechat"])
 }
 
 /// Detect the WeChat account directory by scanning /proc/<pid>/fd.
@@ -141,11 +140,23 @@ pub fn find_account_dir(wechat_pid: i64) -> Option<String> {
 }
 
 /// List all .db files that exist on disk for a given account.
+pub fn account_base_paths(account_dir: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    if let Ok(users) = std::fs::read_dir("/home") {
+        for user in users.flatten() {
+            for relative in ["xwechat_files", "Documents/xwechat_files"] {
+                let path = user.path().join(relative).join(account_dir);
+                if path.exists() {
+                    paths.push(path.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    paths
+}
+
 pub fn list_account_dbs(account_dir: &str) -> Vec<String> {
-    let base_paths = [
-        format!("/home/wechat/xwechat_files/{account_dir}"),
-        format!("/home/wechat/Documents/xwechat_files/{account_dir}"),
-    ];
+    let base_paths = account_base_paths(account_dir);
 
     for base in &base_paths {
         let db_storage = PathBuf::from(base).join("db_storage");
@@ -204,10 +215,7 @@ pub fn get_db_path(account_dir: &str, db_name: &str) -> String {
         .map(|(_, dir)| *dir)
         .unwrap_or_else(|| db_name.strip_suffix(".db").unwrap_or(db_name));
 
-    let base_paths = [
-        format!("/home/wechat/xwechat_files/{account_dir}"),
-        format!("/home/wechat/Documents/xwechat_files/{account_dir}"),
-    ];
+    let base_paths = account_base_paths(account_dir);
 
     for base in &base_paths {
         let full_path = Path::new(base)
@@ -219,8 +227,10 @@ pub fn get_db_path(account_dir: &str, db_name: &str) -> String {
         }
     }
 
-    // Default to first path
-    Path::new(&base_paths[0])
+    // Preserve a deterministic path for callers that only use it for an
+    // existence check before the account directory is created.
+    Path::new("/home/wechat/xwechat_files")
+        .join(account_dir)
         .join("db_storage")
         .join(sub_dir)
         .join(db_name)
@@ -434,6 +444,9 @@ mod tests {
         let count_fresh: i64 = reader2
             .query_row("SELECT count(*) FROM messages", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(count_fresh, 3, "Fresh immutable connection should see committed writes");
+        assert_eq!(
+            count_fresh, 3,
+            "Fresh immutable connection should see committed writes"
+        );
     }
 }

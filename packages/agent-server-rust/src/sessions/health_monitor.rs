@@ -6,7 +6,7 @@ use crate::sessions::manager::get_session;
 use crate::tools::a11y::get_a11y_desktop;
 use crate::tools::exec::ExecOptions;
 use crate::tools::screenshot::capture_screenshot;
-use crate::tools::wechat_db::find_wechat_pid;
+use crate::tools::wechat_db::find_wechat_pid_for_user;
 
 /// How often to run the health scan (in seconds).
 const SCAN_INTERVAL_SECS: u64 = 1;
@@ -86,7 +86,7 @@ pub fn spawn_health_monitor() {
             };
 
             // Check if WeChat process is even running
-            let wechat_pid = match find_wechat_pid() {
+            let wechat_pid = match find_wechat_pid_for_user(&session.linux_user) {
                 Some(pid) => {
                     if !was_running {
                         tracing::info!("[health] WeChat process found (pid={})", pid);
@@ -151,9 +151,7 @@ pub fn spawn_health_monitor() {
                 }
             };
 
-            let screenshot = capture_screenshot(&exec_options)
-                .await
-                .unwrap_or_default();
+            let screenshot = capture_screenshot(&exec_options).await.unwrap_or_default();
             let identified = identify_states(&a11y, &screenshot);
 
             if identified.main_window.is_some() {
