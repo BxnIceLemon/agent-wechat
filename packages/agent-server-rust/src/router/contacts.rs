@@ -2,6 +2,7 @@ use axum::{extract::Query, Json};
 use serde::Deserialize;
 use std::collections::HashMap;
 
+use crate::context::create_context;
 use crate::db::get_db;
 use crate::ia::types::{Contact, Session};
 use crate::router::session::ActiveSession;
@@ -92,6 +93,29 @@ pub async fn find_contacts(
 }
 
 pub async fn current_profile(ActiveSession(session): ActiveSession) -> Json<Option<Contact>> {
+    let logged_in_user = match session.logged_in_user.clone() {
+        Some(user) => user,
+        None => return Json(None),
+    };
+    let account_name = {
+        let db = get_db();
+        create_context(session.clone(), &db)
+            .state
+            .main_window
+            .account_name
+    };
+    if let Some(nick_name) = account_name {
+        return Json(Some(Contact {
+            username: logged_in_user,
+            nick_name,
+            remark: None,
+            alias: None,
+            big_head_url: None,
+            small_head_url: None,
+            contact_type: "individual".to_string(),
+        }));
+    }
+
     let (logged_in_user, keys) = match account_keys(&session).await {
         Some(account) => account,
         None => return Json(None),
