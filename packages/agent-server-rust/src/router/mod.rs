@@ -42,6 +42,7 @@ pub fn build_router() -> Router {
         .route("/api/chats/find", get(chats::find_chats))
         .route("/api/chats/{id}/open", post(chats::open_chat))
         // Contacts
+        .route("/api/profile", get(contacts::current_profile))
         .route("/api/contacts", get(contacts::list_contacts))
         .route("/api/contacts/find", get(contacts::find_contacts))
         // Messages

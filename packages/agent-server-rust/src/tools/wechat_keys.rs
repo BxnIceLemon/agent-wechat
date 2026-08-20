@@ -3,15 +3,31 @@ use super::wechat_db::{get_db_path, list_account_dbs};
 use rusqlite::{params, Connection, OpenFlags};
 use std::collections::HashMap;
 
+fn home_from_environ(data: &[u8]) -> Option<String> {
+    data.split(|byte| *byte == 0)
+        .find_map(|value| value.strip_prefix(b"HOME="))
+        .and_then(|value| std::str::from_utf8(value).ok())
+        .filter(|value| value.starts_with('/'))
+        .map(String::from)
+}
+
+fn process_home(wechat_pid: i64) -> String {
+    std::fs::read(format!("/proc/{wechat_pid}/environ"))
+        .ok()
+        .and_then(|data| home_from_environ(&data))
+        .unwrap_or_else(|| "/home/wechat".to_string())
+}
+
 /// Extract all WeChat DB credentials (async, non-blocking).
 /// Calls the Python extract-keys script.
 pub async fn extract_keys_async(wechat_pid: i64) -> HashMap<String, String> {
     let out_path = format!("/tmp/wechat_keys_{wechat_pid}.json");
+    let home = format!("HOME={}", process_home(wechat_pid));
 
     let _ = exec_command(
         "env",
         &[
-            "HOME=/home/wechat",
+            &home,
             "python3",
             "/opt/tools/extract-keys.py",
             "--pid",
@@ -49,6 +65,19 @@ pub async fn extract_keys_async(wechat_pid: i64) -> HashMap<String, String> {
     let _ = std::fs::remove_file(&out_path);
 
     result.unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::home_from_environ;
+
+    #[test]
+    fn reads_home_from_the_target_process() {
+        assert_eq!(
+            home_from_environ(b"DISPLAY=:100\0HOME=/home/wechat-100\0USER=wechat-100\0"),
+            Some("/home/wechat-100".to_string())
+        );
+    }
 }
 
 /// Get stored keys for a session + account from the agent DB.

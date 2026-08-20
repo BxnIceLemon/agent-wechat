@@ -1,5 +1,6 @@
 use super::wechat_db::{get_db_path, query_wechat_db};
 use crate::ia::types::Contact;
+use serde_json::Value;
 use std::collections::HashMap;
 
 /// Known system/internal usernames to exclude from contact listings.
@@ -38,6 +39,37 @@ fn is_system_account(username: &str) -> bool {
     SYSTEM_USERNAMES.contains(&username)
 }
 
+fn contact_from_row(row: &Value) -> Option<Contact> {
+    let username = row.get("username")?.as_str()?;
+    if is_system_account(username) {
+        return None;
+    }
+
+    let local_type = row
+        .get("local_type")
+        .and_then(|value| value.as_i64())
+        .unwrap_or(3);
+    let text = |name| {
+        row.get(name)
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+            .map(String::from)
+    };
+    Some(Contact {
+        username: username.to_string(),
+        nick_name: row
+            .get("nick_name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string(),
+        remark: text("remark"),
+        alias: text("alias"),
+        big_head_url: text("big_head_url"),
+        small_head_url: text("small_head_url"),
+        contact_type: classify_contact(username, local_type).to_string(),
+    })
+}
+
 /// List contacts from contact.db.
 /// Queries the contact table directly (not session.db), returning all stored contacts.
 pub fn list_contacts(
@@ -68,49 +100,7 @@ pub fn list_contacts(
         ),
     );
 
-    rows.iter()
-        .filter_map(|row| {
-            let username = row.get("username")?.as_str()?;
-            if is_system_account(username) {
-                return None;
-            }
-
-            let local_type = row
-                .get("local_type")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(3);
-
-            Some(Contact {
-                username: username.to_string(),
-                nick_name: row
-                    .get("nick_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                remark: row
-                    .get("remark")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .map(String::from),
-                alias: row
-                    .get("alias")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .map(String::from),
-                big_head_url: row
-                    .get("big_head_url")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .map(String::from),
-                small_head_url: row
-                    .get("small_head_url")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .map(String::from),
-                contact_type: classify_contact(username, local_type).to_string(),
-            })
-        })
-        .collect()
+    rows.iter().filter_map(contact_from_row).collect()
 }
 
 /// Search contacts by name (partial match on nick_name, remark, alias, or username).
@@ -144,47 +134,29 @@ pub fn find_contacts(
         ),
     );
 
-    rows.iter()
-        .filter_map(|row| {
-            let username = row.get("username")?.as_str()?;
-            if is_system_account(username) {
-                return None;
-            }
+    rows.iter().filter_map(contact_from_row).collect()
+}
 
-            let local_type = row
-                .get("local_type")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(3);
-
-            Some(Contact {
-                username: username.to_string(),
-                nick_name: row
-                    .get("nick_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                remark: row
-                    .get("remark")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .map(String::from),
-                alias: row
-                    .get("alias")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .map(String::from),
-                big_head_url: row
-                    .get("big_head_url")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .map(String::from),
-                small_head_url: row
-                    .get("small_head_url")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .map(String::from),
-                contact_type: classify_contact(username, local_type).to_string(),
-            })
-        })
-        .collect()
+/// Read the profile row belonging to the currently logged-in account.
+pub fn get_profile(
+    account_dir: &str,
+    keys: &HashMap<String, String>,
+    logged_in_user: &str,
+) -> Option<Contact> {
+    let contact_key = keys.get("contact.db")?;
+    let escaped = logged_in_user.replace('\'', "''");
+    let rows = query_wechat_db(
+        &get_db_path(account_dir, "contact.db"),
+        contact_key,
+        &format!(
+            "SELECT username, nick_name, remark, alias, big_head_url, small_head_url, local_type
+             FROM contact
+             WHERE local_type IN (1, 3, 5)
+               AND (username = '{escaped}'
+                    OR substr('{escaped}', 1, length(username) + 1) = username || '_')
+             ORDER BY length(username) DESC
+             LIMIT 1;"
+        ),
+    );
+    rows.first().and_then(contact_from_row)
 }
