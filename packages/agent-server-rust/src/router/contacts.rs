@@ -6,8 +6,8 @@ use crate::db::get_db;
 use crate::ia::types::{Contact, Session};
 use crate::router::session::ActiveSession;
 use crate::tools::wechat_contacts;
-use crate::tools::wechat_db::{find_wechat_pid_for_user, list_account_dbs};
-use crate::tools::wechat_keys::{extract_keys_async, get_stored_keys, store_keys};
+use crate::tools::wechat_db::{find_wechat_pid_for_user, get_db_path, list_account_dbs};
+use crate::tools::wechat_keys::{extract_keys_async, get_stored_keys, store_keys, verify_key};
 
 #[derive(Deserialize)]
 pub struct ListParams {
@@ -28,7 +28,10 @@ async fn account_keys(session: &Session) -> Option<(String, HashMap<String, Stri
         get_stored_keys(&db, &session.id, &logged_in_user)
     };
 
-    if !keys.contains_key("contact.db")
+    let contact_key_valid = keys
+        .get("contact.db")
+        .is_some_and(|key| verify_key(&get_db_path(&logged_in_user, "contact.db"), key));
+    if !contact_key_valid
         && list_account_dbs(&logged_in_user)
             .iter()
             .any(|name| name == "contact.db")

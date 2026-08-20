@@ -36,7 +36,7 @@ pub async fn extract_keys_async(wechat_pid: i64) -> HashMap<String, String> {
             &out_path,
         ],
         &ExecOptions {
-            timeout_ms: 120_000,
+            timeout_ms: 300_000,
             ..Default::default()
         },
     )
